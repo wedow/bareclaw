@@ -562,39 +562,29 @@ agent_run:
         jmp .agent_done
 
 .api_error:
-        ; check if rate limited — scan error message for "rate"
-        mov rax, qword [json_resp_buf + RESP_ERROR_MSG]
-        test rax, rax
-        jz .api_error_final
-        mov rcx, qword [json_resp_buf + RESP_ERROR_MSG_LEN]
-        cmp rcx, 4
-        jl .api_error_final
-        sub rcx, 3                  ; last valid start position
-        xor r8, r8                  ; scan index
-.rate_scan:
-        cmp r8, rcx
-        jge .api_error_final
-        cmp byte [rax + r8], 'r'
-        jne .rate_next
-        cmp byte [rax + r8 + 1], 'a'
-        jne .rate_next
-        cmp byte [rax + r8 + 2], 't'
-        jne .rate_next
-        cmp byte [rax + r8 + 3], 'e'
-        je .rate_limited
-.rate_next:
-        inc r8
-        jmp .rate_scan
-
-.rate_limited:
-        ; check retry count
+        ; retry any API error with backoff
         cmp qword [retry_count], 5
         jge .api_error_final
-        ; print "[retry] rate limited, waiting Ns...\n" to stderr
+        ; print "[retry] <error msg>, waiting Ns...\n" to stderr
         mov eax, 1
         mov edi, 2
         lea rsi, [.retry_prefix]
         mov edx, .retry_prefix_end - .retry_prefix
+        syscall
+        ; print the actual error message
+        mov rax, qword [json_resp_buf + RESP_ERROR_MSG]
+        test rax, rax
+        jz .retry_no_msg
+        mov eax, 1
+        mov edi, 2
+        mov rsi, qword [json_resp_buf + RESP_ERROR_MSG]
+        mov rdx, qword [json_resp_buf + RESP_ERROR_MSG_LEN]
+        syscall
+.retry_no_msg:
+        mov eax, 1
+        mov edi, 2
+        lea rsi, [.retry_wait]
+        mov edx, .retry_wait_end - .retry_wait
         syscall
         ; print backoff digit(s) — convert retry_backoff to ascii
         mov rax, [retry_backoff]
@@ -699,8 +689,10 @@ agent_run:
 .err_parse_end:
 .err_api_prefix db 'error: API returned error: '
 .err_api_prefix_end:
-.retry_prefix   db '[retry] rate limited, waiting '
+.retry_prefix   db '[retry] '
 .retry_prefix_end:
+.retry_wait     db ', waiting '
+.retry_wait_end:
 .retry_suffix   db 's...', 10
 .retry_suffix_end:
 .err_turns      db 'error: max turns exceeded', 10
