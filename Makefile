@@ -16,7 +16,7 @@ test: $(TEST_BINS)
 	done; \
 	exit $$fail
 
-test/%: test/%.asm src/test_macros.inc $(wildcard src/syscalls.inc)
+test/%: test/%.asm src/test_macros.inc $(wildcard src/syscalls.inc) $(wildcard src/strings.inc)
 	fasm $< $@
 
 clean:
