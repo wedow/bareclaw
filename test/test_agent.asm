@@ -200,8 +200,22 @@ entry $
         cmp byte [rax + 12], 'l'
         jne .fail7
         test_pass
-        jmp .test_done
+        jmp .test8
 .fail7: test_fail
+.test8:
+
+; === Test 8: sys_nanosleep returns 0 for short sleep ===
+        test_begin "sys_nanosleep: 1ms sleep returns 0"
+        mov qword [timespec_buf], 0         ; tv_sec = 0
+        mov qword [timespec_buf + 8], 1000000 ; tv_nsec = 1ms
+        lea rdi, [timespec_buf]
+        xor esi, esi                        ; remaining = NULL
+        call sys_nanosleep
+        test rax, rax
+        jnz .fail8
+        test_pass
+        jmp .test_done
+.fail8: test_fail
 .test_done:
 
         call arena_destroy
@@ -228,6 +242,11 @@ timespec_buf dq 0, 0
 ; json scanner buffers
 json_resp_buf rb RESP_SIZE
 json_tc_buf   rb TC_SIZE
+
+; retry state
+retry_count     dq 0
+retry_backoff   dq 0
+retry_digit_buf db 0, 0
 
 ; test data
 dummy_json db '{"role":"user","content":"test"}', 0

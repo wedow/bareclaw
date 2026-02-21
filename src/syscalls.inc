@@ -42,6 +42,11 @@ sys_dup2:
         syscall
         ret
 
+sys_nanosleep:
+        mov eax, 35
+        syscall
+        ret
+
 sys_fork:
         mov eax, 57
         syscall

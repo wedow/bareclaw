@@ -286,6 +286,11 @@ timespec_buf dq 0, 0
 json_resp_buf rb RESP_SIZE
 json_tc_buf   rb TC_SIZE
 
+; retry state
+retry_count     dq 0
+retry_backoff   dq 0
+retry_digit_buf db 0, 0
+
 ; main local state
 main_argc    dq 0
 main_argv    dq 0

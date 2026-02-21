@@ -379,6 +379,10 @@ agent_run:
         call json_build_request
         mov rbx, rax                ; rbx = request length
 
+        ; reset retry state for each turn
+        mov qword [retry_count], 0
+        mov qword [retry_backoff], 1
+.retry_request:
         ; call http_post(endpoint, api_key, body)
         lea rdi, [r12 + CONFIG_ENDPOINT]
         lea rsi, [r12 + CONFIG_API_KEY]
@@ -558,7 +562,85 @@ agent_run:
         jmp .agent_done
 
 .api_error:
-        ; print error message
+        ; check if rate limited — scan error message for "rate"
+        mov rax, qword [json_resp_buf + RESP_ERROR_MSG]
+        test rax, rax
+        jz .api_error_final
+        mov rcx, qword [json_resp_buf + RESP_ERROR_MSG_LEN]
+        cmp rcx, 4
+        jl .api_error_final
+        sub rcx, 3                  ; last valid start position
+        xor r8, r8                  ; scan index
+.rate_scan:
+        cmp r8, rcx
+        jge .api_error_final
+        cmp byte [rax + r8], 'r'
+        jne .rate_next
+        cmp byte [rax + r8 + 1], 'a'
+        jne .rate_next
+        cmp byte [rax + r8 + 2], 't'
+        jne .rate_next
+        cmp byte [rax + r8 + 3], 'e'
+        je .rate_limited
+.rate_next:
+        inc r8
+        jmp .rate_scan
+
+.rate_limited:
+        ; check retry count
+        cmp qword [retry_count], 5
+        jge .api_error_final
+        ; print "[retry] rate limited, waiting Ns...\n" to stderr
+        mov eax, 1
+        mov edi, 2
+        lea rsi, [.retry_prefix]
+        mov edx, .retry_prefix_end - .retry_prefix
+        syscall
+        ; print backoff digit(s) — convert retry_backoff to ascii
+        mov rax, [retry_backoff]
+        lea rdi, [retry_digit_buf]
+        xor rcx, rcx                ; digit count
+        cmp rax, 10
+        jge .two_digits
+        add al, '0'
+        mov byte [rdi], al
+        mov ecx, 1
+        jmp .print_backoff
+.two_digits:
+        ; handles up to 16
+        xor edx, edx
+        mov r8, 10
+        div r8                      ; rax=tens, rdx=ones
+        add al, '0'
+        mov byte [rdi], al
+        add dl, '0'
+        mov byte [rdi + 1], dl
+        mov ecx, 2
+.print_backoff:
+        mov eax, 1
+        mov edi, 2
+        lea rsi, [retry_digit_buf]
+        mov edx, ecx
+        syscall
+        mov eax, 1
+        mov edi, 2
+        lea rsi, [.retry_suffix]
+        mov edx, .retry_suffix_end - .retry_suffix
+        syscall
+        ; sleep for backoff seconds
+        mov rax, [retry_backoff]
+        mov qword [timespec_buf], rax
+        mov qword [timespec_buf + 8], 0
+        lea rdi, [timespec_buf]
+        xor esi, esi
+        call sys_nanosleep
+        ; double backoff, increment retry count
+        shl qword [retry_backoff], 1
+        inc qword [retry_count]
+        jmp .retry_request
+
+.api_error_final:
+        ; print error message and fail
         mov eax, 1
         mov edi, 2
         lea rsi, [.err_api_prefix]
@@ -617,5 +699,9 @@ agent_run:
 .err_parse_end:
 .err_api_prefix db 'error: API returned error: '
 .err_api_prefix_end:
+.retry_prefix   db '[retry] rate limited, waiting '
+.retry_prefix_end:
+.retry_suffix   db 's...', 10
+.retry_suffix_end:
 .err_turns      db 'error: max turns exceeded', 10
 .err_turns_end:
