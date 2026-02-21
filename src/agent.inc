@@ -482,12 +482,12 @@ agent_run:
         cmp rax, 10
         jne .other_finish
 
-        ; build assistant message with tool_calls for the message list
-        ; We need: {"role":"assistant","content":null,"tool_calls":[...]}
-        mov rdi, 524288
+        ; build redacted assistant message for the message list
+        ; {"role":"assistant","content":null,"tool_calls":[...]}
+        ; arguments are replaced with "{}" to avoid WAF triggers
+        mov rdi, 65536
         call arena_alloc
-        mov rbx, rax                ; rbx = assistant msg buffer
-        ; write prefix
+        mov rbx, rax                ; rbx = buffer
         mov rdi, rbx
         lea rsi, [.tc_msg_prefix]
         call str_copy
@@ -496,16 +496,88 @@ agent_run:
         push r15                    ; save turn counter
         mov r15, rax                ; r15 = write cursor
 
-        ; copy tool_calls region from response
-        mov rsi, qword [json_resp_buf + RESP_TOOL_CALLS]
-        mov rcx, qword [json_resp_buf + RESP_TOOL_CALLS_END]
-        mov rdx, rcx
-        sub rdx, rsi                ; length of tool_calls region
-        lea rdi, [rbx + r15]
-        call mem_copy
-        add r15, rdx
+        ; iterate tool calls to build redacted array
+        mov rax, qword [json_resp_buf + RESP_TOOL_CALLS]
+        push rax                    ; [rsp] = tc cursor
+        mov byte [rbx + r15], '['
+        inc r15
+        xor r8d, r8d               ; r8 = tool call index
 
-        ; close the message: }
+.redact_loop:
+        mov rdi, [rsp]              ; tc cursor
+        call json_skip_whitespace
+        mov [rsp], rax
+        cmp byte [rax], '['
+        jne .redact_not_bracket
+        inc qword [rsp]
+        jmp .redact_loop
+.redact_not_bracket:
+        cmp byte [rax], ']'
+        je .redact_done
+        cmp byte [rax], ','
+        jne .redact_parse
+        inc qword [rsp]
+        jmp .redact_loop
+.redact_parse:
+        cmp byte [rax], '{'
+        jne .redact_done
+
+        ; parse this tool call for id and name
+        mov rdi, rax
+        call json_parse_tool_call
+        test rax, rax
+        jnz .redact_done
+
+        ; comma before 2nd+ entries
+        test r8d, r8d
+        jz .redact_no_comma
+        mov byte [rbx + r15], ','
+        inc r15
+.redact_no_comma:
+        ; write: {"id":"
+        lea rsi, [.redact_pre_id]
+        lea rdi, [rbx + r15]
+        call str_copy
+        lea rdi, [rbx + r15]
+        call str_len
+        add r15, rax
+        ; copy id value
+        lea rdi, [rbx + r15]
+        mov rsi, qword [json_tc_buf + TC_ID]
+        mov rdx, qword [json_tc_buf + TC_ID + 8]
+        call mem_copy
+        add r15, qword [json_tc_buf + TC_ID + 8]
+        ; write: ","type":"function","function":{"name":"
+        lea rsi, [.redact_mid_name]
+        lea rdi, [rbx + r15]
+        call str_copy
+        lea rdi, [rbx + r15]
+        call str_len
+        add r15, rax
+        ; copy name value
+        lea rdi, [rbx + r15]
+        mov rsi, qword [json_tc_buf + TC_NAME]
+        mov rdx, qword [json_tc_buf + TC_NAME + 8]
+        call mem_copy
+        add r15, qword [json_tc_buf + TC_NAME + 8]
+        ; write: ","arguments":"{}"}}
+        lea rsi, [.redact_suffix]
+        lea rdi, [rbx + r15]
+        call str_copy
+        lea rdi, [rbx + r15]
+        call str_len
+        add r15, rax
+
+        inc r8d
+        mov rax, qword [json_tc_buf + TC_NEXT]
+        mov [rsp], rax
+        jmp .redact_loop
+
+.redact_done:
+        pop rax                     ; discard tc cursor
+        ; close array and object
+        mov byte [rbx + r15], ']'
+        inc r15
         mov byte [rbx + r15], '}'
         inc r15
         mov byte [rbx + r15], 0
@@ -682,7 +754,10 @@ agent_run:
 .role_assistant db 'assistant', 0
 .str_stop       db 'stop'
 .newline        db 10
-.tc_msg_prefix  db '{"role":"assistant","content":null,"tool_calls":', 0
+.tc_msg_prefix   db '{"role":"assistant","content":null,"tool_calls":', 0
+.redact_pre_id   db '{"id":"', 0
+.redact_mid_name db '","type":"function","function":{"name":"', 0
+.redact_suffix   db '","arguments":"{}"}}', 0
 .err_http       db 'error: http request failed', 10
 .err_http_end:
 .err_parse      db 'error: failed to parse response', 10
