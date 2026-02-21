@@ -352,12 +352,12 @@ json_parse_response:
         mov rdx, r13
         call json_find_key
         test rax, rax
-        jz .fail
+        jz .done_ok
         mov rdi, rax
         call json_skip_whitespace
         mov rdi, rax
         cmp byte [rdi], '"'
-        jne .fail
+        jne .done_ok
         call json_scan_string
         mov qword [json_resp_buf + RESP_ERROR_MSG], rax
         mov qword [json_resp_buf + RESP_ERROR_MSG_LEN], rdx
