@@ -440,10 +440,7 @@ agent_run:
         call msg_list_append_role
 
         ; print content to stdout
-        mov eax, 1
-        mov edi, 1
-        mov rsi, rbx
-        mov rdx, rbx
+        mov rdi, rbx
         call str_len
         mov rdx, rax
         mov rsi, rbx
