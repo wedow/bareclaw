@@ -1,3 +1,6 @@
 bareclaw
 *.o
 *.bin
+test/test_smoke
+test/test_*
+!test/test_*.asm
