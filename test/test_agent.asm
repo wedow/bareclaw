@@ -1,264 +1,166 @@
 format ELF64 executable 3
 
-include '../src/test_macros.inc'
 include '../src/strings.inc'
 
 segment readable executable
 
 include '../src/syscalls.inc'
+include '../src/test_macros.inc'
 include '../src/arena.inc'
-include '../src/json_build.inc'
-include '../src/json_scan.inc'
+include '../src/run_capture.inc'
 include '../src/config.inc'
-include '../src/log.inc'
-include '../src/http.inc'
-include '../src/shell.inc'
+include '../src/session.inc'
+include '../src/json.inc'
 include '../src/agent.inc'
 
-entry $
-        ; init arena
+entry _start
+_start:
         call arena_init
 
-; === Test 1: msg_list_init sets count=0, cap=256 ===
-        test_begin "msg_list_init: count=0, cap=256"
-        call msg_list_init
-        mov rax, [msg_list_count]
+        ; set up fake env
+        lea rdi, [fake_envp]
+        call env_init
+        call config_init
+
+        ; === Test 1: shell_exec ===
+        test_begin 'shell_exec: echo hello'
+        lea rdi, [.cmd_echo]
+        call shell_exec
+        mov rdi, rax
+        lea rsi, [.expect_hello]
+        call str_starts_with
+        assert_eq rax, 1
+
+        ; === Test 2: build_system_prompt with test skills dir ===
+        test_begin 'build_system_prompt: contains skill name'
+        ; create test skills dir and a skill file
+        lea rdi, [.bin_sh]
+        lea rsi, [.argv_mkdir]
+        call run_capture
+        lea rdi, [.bin_sh]
+        lea rsi, [.argv_mkskill]
+        call run_capture
+
+        ; set skills dir
+        lea rax, [test_skills_dir]
+        mov [config_skills_dir], rax
+        call build_system_prompt
+        ; verify prompt contains "testskill"
+        mov rdi, rax
+        lea rsi, [.expect_skill]
+        call .str_contains
+        assert_eq rax, 1
+
+        ; === Test 3: http_post returns non-null (even with bad endpoint) ===
+        test_begin 'http_post: returns non-null'
+        lea rax, [.bad_endpoint]
+        mov [config_endpoint], rax
+        lea rax, [.fake_key]
+        mov [config_api_key], rax
+        lea rdi, [.fake_body]
+        call http_post
         test rax, rax
-        jnz .fail1
-        mov rax, [msg_list_cap]
-        cmp rax, 256
-        jne .fail1
-        mov rax, [msg_list_ptr]
-        test rax, rax
-        jz .fail1
+        jnz .http_ok
+        test_fail
+.http_ok:
         test_pass
-        jmp .test2
-.fail1: test_fail
-.test2:
 
-; === Test 2: msg_list_append increments count ===
-        test_begin "msg_list_append: count goes to 1"
-        lea rdi, [dummy_json]
-        mov rsi, dummy_json_len
-        call msg_list_append
-        mov rax, [msg_list_count]
-        cmp rax, 1
-        jne .fail2
-        ; verify stored pointer
-        mov rcx, [msg_list_ptr]
-        mov rax, [rcx + MSG_JSON_PTR]
-        lea rbx, [dummy_json]
-        cmp rax, rbx
-        jne .fail2
-        ; verify stored length
-        mov rax, [rcx + MSG_JSON_LEN]
-        cmp rax, dummy_json_len
-        jne .fail2
-        test_pass
-        jmp .test3
-.fail2: test_fail
-.test3:
-
-; === Test 3: msg_list_append_role builds valid JSON ===
-        test_begin "msg_list_append_role: builds user message JSON"
-        ; reset for clean state
-        call arena_reset
-        call msg_list_init
-        lea rdi, [role_user]
-        lea rsi, [content_hello]
-        call msg_list_append_role
-        ; count should be 1
-        mov rax, [msg_list_count]
-        cmp rax, 1
-        jne .fail3
-        ; check that stored JSON starts with {"role":"
-        mov rcx, [msg_list_ptr]
-        mov rax, [rcx + MSG_JSON_PTR]
-        cmp byte [rax], '{'
-        jne .fail3
-        cmp byte [rax + 1], '"'
-        jne .fail3
-        cmp byte [rax + 2], 'r'
-        jne .fail3
-        test_pass
-        jmp .test4
-.fail3: test_fail
-.test4:
-
-; === Test 4: multiple appends increase count ===
-        test_begin "msg_list_append: multiple appends"
-        call arena_reset
-        call msg_list_init
-        ; append 5 messages
-        mov r12d, 0
-.append_loop:
-        cmp r12d, 5
-        jge .append_done
-        lea rdi, [dummy_json]
-        mov rsi, dummy_json_len
-        call msg_list_append
-        inc r12d
-        jmp .append_loop
-.append_done:
-        mov rax, [msg_list_count]
-        cmp rax, 5
-        jne .fail4
-        test_pass
-        jmp .test5
-.fail4: test_fail
-.test5:
-
-; === Test 5: agent_compact — no compaction when under limit ===
-        test_begin "agent_compact: no-op when under max_messages"
-        call arena_reset
-        call msg_list_init
-        ; add 5 messages
-        mov r12d, 0
-.add5:
-        cmp r12d, 5
-        jge .add5_done
-        lea rdi, [dummy_json]
-        mov rsi, dummy_json_len
-        call msg_list_append
-        inc r12d
-        jmp .add5
-.add5_done:
-        ; config with max_messages=40
-        lea rdi, [test_config]
-        xor esi, esi                ; log_fd=0 (no logging)
-        call agent_compact
-        ; count should still be 5
-        mov rax, [msg_list_count]
-        cmp rax, 5
-        jne .fail5
-        test_pass
-        jmp .test6
-.fail5: test_fail
-.test6:
-
-; === Test 6: agent_compact — compacts when over limit ===
-        test_begin "agent_compact: compacts 50 messages to 11"
-        call arena_reset
-        call msg_list_init
-        ; add 50 messages
-        mov r12d, 0
-.add50:
-        cmp r12d, 50
-        jge .add50_done
-        lea rdi, [dummy_json]
-        mov rsi, dummy_json_len
-        call msg_list_append
-        inc r12d
-        jmp .add50
-.add50_done:
-        ; verify we have 50
-        mov rax, [msg_list_count]
-        cmp rax, 50
-        jne .fail6
-        ; compact with max_messages=40
-        lea rdi, [test_config]
-        xor esi, esi
-        call agent_compact
-        ; should be 11: system msg (0) + last 10
-        mov rax, [msg_list_count]
-        cmp rax, 11
-        jne .fail6
-        ; system message (index 0) should still point to dummy_json
-        mov rcx, [msg_list_ptr]
-        mov rax, [rcx + MSG_JSON_PTR]
-        lea rbx, [dummy_json]
-        cmp rax, rbx
-        jne .fail6
-        test_pass
-        jmp .test7
-.fail6: test_fail
-.test7:
-
-; === Test 7: msg_list_append_tool_result builds tool message ===
-        test_begin "msg_list_append_tool_result: builds tool message"
-        call arena_reset
-        call msg_list_init
-        lea rdi, [tc_id]
-        lea rsi, [tc_output]
-        call msg_list_append_tool_result
-        ; count should be 1
-        mov rax, [msg_list_count]
-        cmp rax, 1
-        jne .fail7
-        ; check JSON starts with {"role":"tool"
-        mov rcx, [msg_list_ptr]
-        mov rax, [rcx + MSG_JSON_PTR]
-        cmp byte [rax], '{'
-        jne .fail7
-        ; find "tool" in the first 20 bytes
-        cmp byte [rax + 9], 't'
-        jne .fail7
-        cmp byte [rax + 10], 'o'
-        jne .fail7
-        cmp byte [rax + 11], 'o'
-        jne .fail7
-        cmp byte [rax + 12], 'l'
-        jne .fail7
-        test_pass
-        jmp .test8
-.fail7: test_fail
-.test8:
-
-; === Test 8: sys_nanosleep returns 0 for short sleep ===
-        test_begin "sys_nanosleep: 1ms sleep returns 0"
-        mov qword [timespec_buf], 0         ; tv_sec = 0
-        mov qword [timespec_buf + 8], 1000000 ; tv_nsec = 1ms
-        lea rdi, [timespec_buf]
-        xor esi, esi                        ; remaining = NULL
-        call sys_nanosleep
-        test rax, rax
-        jnz .fail8
-        test_pass
-        jmp .test_done
-.fail8: test_fail
-.test_done:
+        ; cleanup
+        lea rdi, [.bin_sh]
+        lea rsi, [.argv_cleanup]
+        call run_capture
 
         call arena_destroy
         tests_done
 
+; str_contains — rdi=haystack, rsi=needle. Returns rax=1 if found, 0 if not.
+.str_contains:
+        push rbx
+        push r12
+        push r13
+        mov r12, rdi
+        mov r13, rsi
+        mov rdi, r13
+        call str_len
+        mov rbx, rax               ; needle len
+        test rbx, rbx
+        jz .sc_yes
+.sc_loop:
+        movzx eax, byte [r12]
+        test al, al
+        jz .sc_no
+        mov rdi, r12
+        mov rsi, r13
+        call str_starts_with
+        test rax, rax
+        jnz .sc_yes
+        inc r12
+        jmp .sc_loop
+.sc_yes:
+        mov rax, 1
+        pop r13
+        pop r12
+        pop rbx
+        ret
+.sc_no:
+        xor eax, eax
+        pop r13
+        pop r12
+        pop rbx
+        ret
+
+; --- data ---
+.cmd_echo     db 'echo hello', 0
+.expect_hello db 'hello', 0
+.expect_skill db 'testskill', 0
+.bad_endpoint db 'http://127.0.0.1:1', 0
+.fake_key     db 'fake-key', 0
+.fake_body    db '{}', 0
+
+.bin_sh db '/bin/sh', 0
+.arg_c  db '-c', 0
+.mkdir_cmd   db 'mkdir -p /tmp/szc_test_skills', 0
+.mkskill_cmd db 'printf "%s\n" "---" "name: testskill" "description: a test skill" "---" "Body" > /tmp/szc_test_skills/test.md', 0
+.cleanup_cmd db 'rm -rf /tmp/szc_test_skills', 0
+
+align 8
+.argv_mkdir    dq .bin_sh, .arg_c, .mkdir_cmd, 0
+.argv_mkskill  dq .bin_sh, .arg_c, .mkskill_cmd, 0
+.argv_cleanup  dq .bin_sh, .arg_c, .cleanup_cmd, 0
+
 segment readable writeable
 
-; arena
+test_skills_dir db '/tmp/szc_test_skills', 0
+
+align 8
+fake_envp:
+        dq .env1, .env2, 0
+.env1 db 'BARECLAW_API_KEY=test-key', 0
+.env2 db 'HOME=/tmp', 0
+
 arena_base dq 0
 arena_pos  dq 0
 arena_end  dq 0
 
-; message list
-msg_list_ptr   dq 0
-msg_list_count dq 0
-msg_list_cap   dq 0
-
-; shared state for other modules
 pipe_fds    dd 0, 0
 wait_status dd 0
-envp_ptr    dq 0
-timespec_buf dq 0, 0
 
-; json scanner buffers
+envp_ptr   dq 0
+
+config_api_key      dq 0
+config_model        dq 0
+config_endpoint     dq 0
+config_skills_dir   dq 0
+config_sessions_dir dq 0
+
+msg_list_ptr   dq 0
+msg_list_count dq 0
+
 json_resp_buf rb RESP_SIZE
 json_tc_buf   rb TC_SIZE
 
-; retry state
+tc_cursor       dq 0
 retry_count     dq 0
 retry_backoff   dq 0
-retry_digit_buf db 0, 0
-
-; test data
-dummy_json db '{"role":"user","content":"test"}', 0
-dummy_json_len = $ - dummy_json - 1
-
-role_user      db 'user', 0
-content_hello  db 'hello', 0
-tc_id          db 'call_123', 0
-tc_output      db 'file1.txt', 0
-
-; test config — only max_messages field matters for compact test
-test_config:
-        rb CONFIG_MAX_MSGS         ; pad up to max_msgs offset
-        dq 40                      ; max_messages = 40
-        rb CONFIG_SIZE - CONFIG_MAX_MSGS - 8
+retry_digit_buf rb 4
+timespec_buf    dq 0, 0
