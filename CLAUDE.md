@@ -37,7 +37,7 @@ Single compilation unit: `src/main.asm` includes all `.inc` modules. No separate
 
 ```
 BARECLAW_API_KEY       # required — API key
-BARECLAW_MODEL         # default: minimax/minimax-m2.5
+BARECLAW_MODEL         # default: anthropic/claude-haiku-4.5
 BARECLAW_ENDPOINT      # default: https://openrouter.ai/api/v1/chat/completions
 BARECLAW_SKILLS_DIR    # default: ~/.bareclaw/skills
 BARECLAW_SESSIONS_DIR  # default: ~/.bareclaw/sessions

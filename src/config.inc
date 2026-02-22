@@ -142,7 +142,7 @@ config_init:
 .env_sessions db 'BARECLAW_SESSIONS_DIR', 0
 .env_home     db 'HOME', 0
 
-.default_model    db 'minimax/minimax-m2.5', 0
+.default_model    db 'anthropic/claude-haiku-4.5', 0
 .default_endpoint db 'https://openrouter.ai/api/v1/chat/completions', 0
 .suffix_skills    db '/.bareclaw/skills', 0
 .suffix_sessions  db '/.bareclaw/sessions', 0

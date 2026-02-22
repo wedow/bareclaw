@@ -55,7 +55,7 @@ All via environment variables:
 | Variable | Default |
 |----------|---------|
 | `BARECLAW_API_KEY` | *(required)* |
-| `BARECLAW_MODEL` | `minimax/minimax-m2.5` |
+| `BARECLAW_MODEL` | `anthropic/claude-haiku-4.5` |
 | `BARECLAW_ENDPOINT` | `https://openrouter.ai/api/v1/chat/completions` |
 | `BARECLAW_SKILLS_DIR` | `~/.bareclaw/skills` |
 | `BARECLAW_SESSIONS_DIR` | `~/.bareclaw/sessions` |

@@ -61,7 +61,7 @@ _start:
         tests_done
 
 .expect_key      db 'test-key', 0
-.expect_model    db 'minimax/minimax-m2.5', 0
+.expect_model    db 'anthropic/claude-haiku-4.5', 0
 .expect_sessions db '/tmp/.bareclaw/sessions', 0
 
 segment readable writeable
