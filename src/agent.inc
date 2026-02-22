@@ -256,39 +256,46 @@ agent_run:
         jnz .check_tool_calls
 
         ; --- finish_reason = "stop" ---
-        ; null-terminate content
         mov rax, qword [json_resp_buf + RESP_CONTENT_LEN]
         test rax, rax
         jz .stop_null
 
-        push rax
-        lea rdi, [rax + 1]
-        call arena_alloc
-        mov rbx, rax
-        mov rdi, rax
-        mov rsi, qword [json_resp_buf + RESP_CONTENT]
-        pop rdx
-        push rdx
-        call mem_copy
-        pop rdx
-        mov byte [rbx + rdx], 0
-
-        ; build assistant message, append to session
+        ; build assistant message with raw content (already JSON-escaped)
         mov rdi, 131072
         call arena_alloc
         mov r14, rax
         mov rdi, rax
-        lea rsi, [.role_assistant]
+        mov rsi, .stop_msg_pre
+        call str_copy
+        mov rdi, r14
+        call str_len
+        mov rbx, rax               ; rbx = write cursor
+        lea rdi, [r14 + rbx]
+        mov rsi, qword [json_resp_buf + RESP_CONTENT]
+        mov rdx, qword [json_resp_buf + RESP_CONTENT_LEN]
+        call mem_copy
+        add rbx, qword [json_resp_buf + RESP_CONTENT_LEN]
+        lea rsi, [.stop_msg_suf]
+        lea rdi, [r14 + rbx]
+        call str_copy
+        lea rdi, [r14 + rbx]
+        call str_len
+        add rbx, rax
+        mov byte [r14 + rbx], 0
         mov rdx, rbx
-        call json_build_message
-        mov rdx, rax               ; length
         mov edi, r13d
         mov rsi, r14
         call session_append
 
-        ; print content to stdout
-        mov rdi, rbx
-        call str_len
+        ; unescape content for stdout
+        mov rdi, qword [json_resp_buf + RESP_CONTENT_LEN]
+        add rdi, 256
+        call arena_alloc
+        mov rbx, rax
+        mov rdi, qword [json_resp_buf + RESP_CONTENT]
+        mov rsi, qword [json_resp_buf + RESP_CONTENT_LEN]
+        mov rdx, rbx
+        call json_unescape
         mov rdx, rax
         mov eax, 1
         mov edi, 1
@@ -324,7 +331,7 @@ agent_run:
         cmp rax, 10
         jne .other_finish
 
-        ; build REDACTED assistant message
+        ; build assistant message with raw tool_calls from response
         mov rdi, 65536
         call arena_alloc
         mov rbx, rax
@@ -336,90 +343,20 @@ agent_run:
         push r15                   ; save turn counter
         mov r15, rax               ; r15 = write cursor
 
-        ; iterate tool calls to build redacted array
-        mov rax, qword [json_resp_buf + RESP_TOOL_CALLS]
-        push rax                   ; [rsp] = tc cursor
-        mov byte [rbx + r15], '['
-        inc r15
-        xor r8d, r8d              ; tool call index
-
-.redact_loop:
-        mov rdi, [rsp]
-        call json_skip_whitespace
-        mov [rsp], rax
-        cmp byte [rax], '['
-        jne .redact_not_bracket
-        inc qword [rsp]
-        jmp .redact_loop
-.redact_not_bracket:
-        cmp byte [rax], ']'
-        je .redact_done
-        cmp byte [rax], ','
-        jne .redact_parse
-        inc qword [rsp]
-        jmp .redact_loop
-.redact_parse:
-        cmp byte [rax], '{'
-        jne .redact_done
-
-        mov rdi, rax
-        call json_parse_tool_call
-        test rax, rax
-        jnz .redact_done
-
-        test r8d, r8d
-        jz .redact_no_comma
-        mov byte [rbx + r15], ','
-        inc r15
-.redact_no_comma:
-        ; {"id":"
-        lea rsi, [.redact_pre_id]
+        ; copy raw tool_calls JSON from response
+        mov rsi, qword [json_resp_buf + RESP_TOOL_CALLS]
+        mov rdx, qword [json_resp_buf + RESP_TOOL_CALLS_END]
+        sub rdx, rsi               ; rdx = byte count
         lea rdi, [rbx + r15]
-        call str_copy
-        lea rdi, [rbx + r15]
-        call str_len
-        add r15, rax
-        ; id value
-        lea rdi, [rbx + r15]
-        mov rsi, qword [json_tc_buf + TC_ID]
-        mov rdx, qword [json_tc_buf + TC_ID + 8]
         call mem_copy
-        add r15, qword [json_tc_buf + TC_ID + 8]
-        ; ","type":"function","function":{"name":"
-        lea rsi, [.redact_mid_name]
-        lea rdi, [rbx + r15]
-        call str_copy
-        lea rdi, [rbx + r15]
-        call str_len
+        mov rax, qword [json_resp_buf + RESP_TOOL_CALLS_END]
+        sub rax, qword [json_resp_buf + RESP_TOOL_CALLS]
         add r15, rax
-        ; name value
-        lea rdi, [rbx + r15]
-        mov rsi, qword [json_tc_buf + TC_NAME]
-        mov rdx, qword [json_tc_buf + TC_NAME + 8]
-        call mem_copy
-        add r15, qword [json_tc_buf + TC_NAME + 8]
-        ; ","arguments":"{}"}}
-        lea rsi, [.redact_suffix]
-        lea rdi, [rbx + r15]
-        call str_copy
-        lea rdi, [rbx + r15]
-        call str_len
-        add r15, rax
-
-        inc r8d
-        mov rax, qword [json_tc_buf + TC_NEXT]
-        mov [rsp], rax
-        jmp .redact_loop
-
-.redact_done:
-        pop rax                    ; discard tc cursor
-        mov byte [rbx + r15], ']'
-        inc r15
         mov byte [rbx + r15], '}'
         inc r15
         mov byte [rbx + r15], 0
 
-        ; append redacted assistant msg to session
+        ; append assistant msg to session
         mov edi, r13d
         mov rsi, rbx
         mov rdx, r15
@@ -688,9 +625,8 @@ agent_run:
 .newline         db 10
 .key_command     db 'command', 0
 .tc_msg_prefix   db '{"role":"assistant","content":null,"tool_calls":', 0
-.redact_pre_id   db '{"id":"', 0
-.redact_mid_name db '","type":"function","function":{"name":"', 0
-.redact_suffix   db '","arguments":"{}"}}', 0
+.stop_msg_pre    db '{"role":"assistant","content":"', 0
+.stop_msg_suf    db '"}', 0
 .err_http        db 'error: http request failed', 10
 .err_http_end:
 .err_parse       db 'error: failed to parse response', 10
