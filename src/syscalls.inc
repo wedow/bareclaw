@@ -22,6 +22,16 @@ sys_close:
         syscall
         ret
 
+sys_lseek:
+        mov eax, 8
+        syscall
+        ret
+
+sys_ftruncate:
+        mov eax, 77
+        syscall
+        ret
+
 sys_mmap:
         mov eax, 9
         syscall
