@@ -151,7 +151,7 @@ build_system_prompt:
         ret
 
 .skill_cmd_pre db 'for f in ', 0
-.skill_cmd_suf db '/*.md; do [ -f "$f" ] || continue; n=$(sed -n ', 27h, 's/^name: *//p', 27h, ' "$f" | head -1); d=$(sed -n ', 27h, 's/^description: *//p', 27h, ' "$f" | head -1); [ -n "$n" ] && echo "- $n: $d ($f)"; done 2>/dev/null', 0
+.skill_cmd_suf db '/*/SKILL.md; do [ -f "$f" ] || continue; n=$(sed -n ', 27h, '/^---$/,/^---$/{ s/^name: *//p; }', 27h, ' "$f" | head -1); d=$(sed -n ', 27h, '/^---$/,/^---$/{ s/^description: *//p; }', 27h, ' "$f" | head -1); [ -n "$n" ] && echo "- $n: $d ($f)"; done 2>/dev/null', 0
 
 .prompt_base db 'You are BareClaw, a minimal agentic assistant.', 10, \
                 'You have one tool: shell. Use it to run any command.', 10, \

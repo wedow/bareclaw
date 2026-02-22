@@ -119,8 +119,8 @@ _start:
 
 .bin_sh db '/bin/sh', 0
 .arg_c  db '-c', 0
-.mkdir_cmd   db 'mkdir -p /tmp/szc_test_skills', 0
-.mkskill_cmd db 'printf "%s\n" "---" "name: testskill" "description: a test skill" "---" "Body" > /tmp/szc_test_skills/test.md', 0
+.mkdir_cmd   db 'mkdir -p /tmp/szc_test_skills/testskill', 0
+.mkskill_cmd db 'printf "%s\n" "---" "name: testskill" "description: a test skill" "---" "Body" > /tmp/szc_test_skills/testskill/SKILL.md', 0
 .cleanup_cmd db 'rm -rf /tmp/szc_test_skills', 0
 
 align 8
