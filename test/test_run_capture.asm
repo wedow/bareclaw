@@ -70,3 +70,4 @@ arena_end  dq 0
 
 pipe_fds    dd 0, 0
 wait_status dd 0
+envp_ptr    dq 0

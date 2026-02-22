@@ -112,10 +112,10 @@ run_capture:
         mov edi, [pipe_fds + 4]
         call sys_close
 
-        ; execve(path, argv, NULL)
+        ; execve(path, argv, envp)
         mov rdi, r12
         mov rsi, r13
-        xor edx, edx               ; envp = NULL
+        mov rdx, [envp_ptr]
         call sys_execve
 
         ; execve failed — exit 127

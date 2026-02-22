@@ -89,9 +89,9 @@ session_create:
         mov esi, 493                ; 0755
         call sys_mkdir
 
-        ; open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644)
+        ; open(path, O_RDWR|O_CREAT|O_TRUNC, 0644)
         mov rdi, rbx
-        mov esi, 0x241              ; 1|64|512
+        mov esi, 0x242              ; 2|64|512
         mov edx, 420                ; 0644
         call sys_open
         pop rbx
