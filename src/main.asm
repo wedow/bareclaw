@@ -204,6 +204,14 @@ _start:
         mov [session_fd], eax
 
 .session_ready:
+        ; open debug log
+        mov rdi, [session_id]
+        call session_open_log
+        test eax, eax
+        js .skip_log_open
+        mov [log_fd], eax
+.skip_log_open:
+
         ; print banner to stderr: "bareclaw · MODEL · SESSION_ID\n"
         mov edi, 2
         lea rsi, [str_banner_pre]
@@ -245,6 +253,12 @@ _start:
         call agent_run
         mov r12, rax
 
+        ; close log fd
+        mov edi, [log_fd]
+        test edi, edi
+        jle .close_session
+        call sys_close
+.close_session:
         ; close session fd
         mov edi, [session_fd]
         call sys_close
@@ -322,6 +336,11 @@ _start:
         jmp .repl_loop
 
 .repl_exit:
+        mov edi, [log_fd]
+        test edi, edi
+        jle .close_session_repl
+        call sys_close
+.close_session_repl:
         mov edi, [session_fd]
         call sys_close
         xor edi, edi
@@ -379,6 +398,7 @@ envp dq 0
 session_id     dq 0
 prompt_ptr     dq 0
 session_fd     dd 0
+log_fd         dd 0
 sys_prompt_ptr dq 0
 session_id_buf rb 17
 

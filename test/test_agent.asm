@@ -164,3 +164,5 @@ retry_count     dq 0
 retry_backoff   dq 0
 retry_digit_buf rb 4
 timespec_buf    dq 0, 0
+
+log_fd          dd 0

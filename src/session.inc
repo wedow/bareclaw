@@ -46,11 +46,13 @@ session_gen_id:
         pop rbx
         ret
 
-; _session_build_path — rdi=session_id. Builds path in arena. Returns rax=path.
+; _session_build_path — rdi=session_id, rsi=extension. Builds path in arena. Returns rax=path.
 _session_build_path:
         push rbx
         push r12
-        mov r12, rdi
+        push r13
+        mov r12, rdi            ; session_id
+        mov r13, rsi            ; extension
         mov rdi, 512
         call arena_alloc
         mov rbx, rax
@@ -66,21 +68,21 @@ _session_build_path:
         mov rdi, rbx
         call str_len
         lea rdi, [rbx + rax]
-        mov byte [rdi], '.'
-        mov byte [rdi+1], 'j'
-        mov byte [rdi+2], 's'
-        mov byte [rdi+3], 'o'
-        mov byte [rdi+4], 'n'
-        mov byte [rdi+5], 'l'
-        mov byte [rdi+6], 0
+        mov rsi, r13
+        call str_copy
         mov rax, rbx
+        pop r13
         pop r12
         pop rbx
         ret
 
+_ext_jsonl db '.jsonl', 0
+_ext_log   db '.log', 0
+
 ; session_create — rdi=session_id. Returns rax=fd.
 session_create:
         push rbx
+        lea rsi, [_ext_jsonl]
         call _session_build_path
         mov rbx, rax
 
@@ -99,10 +101,21 @@ session_create:
 
 ; session_open — rdi=session_id. Returns rax=fd or negative.
 session_open:
+        lea rsi, [_ext_jsonl]
         call _session_build_path
         mov rdi, rax
         mov esi, 0x402              ; O_RDWR|O_APPEND
         xor edx, edx
+        call sys_open
+        ret
+
+; session_open_log — rdi=session_id. Returns rax=fd or negative.
+session_open_log:
+        lea rsi, [_ext_log]
+        call _session_build_path
+        mov rdi, rax
+        mov esi, 0x441              ; O_WRONLY|O_CREAT|O_APPEND
+        mov edx, 420                ; 0644
         call sys_open
         ret
 

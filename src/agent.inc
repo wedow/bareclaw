@@ -158,6 +158,40 @@ build_system_prompt:
                 'Be concise. Just do it.', 10, 10, \
                 'Available skills (read the full file with cat if relevant):', 10, 0
 
+; _log_blob — rdi=marker (null-terminated), rsi=data (null-terminated)
+; Writes marker + data + newline to [log_fd]. No-op if log_fd <= 0.
+_log_blob:
+        mov eax, [log_fd]
+        test eax, eax
+        jle .nolog
+        push rbx
+        push r12
+        push r13
+        mov ebx, eax
+        mov r12, rdi
+        mov r13, rsi
+        mov rdi, r12
+        call str_len
+        mov rdx, rax
+        mov edi, ebx
+        mov rsi, r12
+        call sys_write
+        mov rdi, r13
+        call str_len
+        mov rdx, rax
+        mov edi, ebx
+        mov rsi, r13
+        call sys_write
+        mov edi, ebx
+        lea rsi, [.lf]
+        mov edx, 1
+        call sys_write
+        pop r13
+        pop r12
+        pop rbx
+.nolog: ret
+.lf     db 10
+
 ; agent_run — rdi=user_input, rsi=session_fd
 ; Main agent loop. Returns 0 on success, -1 on error.
 agent_run:
@@ -217,6 +251,11 @@ agent_run:
         mov r8, 1                  ; include tools
         call json_build_request
 
+        ; log request
+        lea rdi, [.log_req]
+        mov rsi, rbp
+        call _log_blob
+
         ; reset retry state
         mov qword [retry_count], 0
         mov qword [retry_backoff], 1
@@ -228,6 +267,11 @@ agent_run:
         test rax, rax
         jz .http_error
         mov r12, rax               ; r12 = response
+
+        ; log response
+        lea rdi, [.log_resp]
+        mov rsi, r12
+        call _log_blob
 
         ; get response length
         mov rdi, r12
@@ -641,3 +685,5 @@ agent_run:
 .retry_suffix_end:
 .err_turns       db 'error: max turns exceeded', 10
 .err_turns_end:
+.log_req  db '>>> ', 0
+.log_resp db '<<< ', 0

@@ -148,9 +148,37 @@ _start:
         call str_starts_with
         assert_eq rax, 1
 
-        ; cleanup
+        ; cleanup test_fd from compact test
         mov edi, [test_fd]
         call sys_close
+
+.test6:
+        ; === Test 6: session_open_log creates .log file ===
+        test_begin 'session: open_log returns valid fd'
+        lea rdi, [test_sid]
+        call session_open_log
+        cmp rax, 0
+        jl .fail6
+        mov [test_log_fd], eax
+
+        ; write something to verify it's writable
+        mov edi, eax
+        lea rsi, [.log_data]
+        mov edx, .log_data_len
+        call sys_write
+        cmp rax, .log_data_len
+        jne .fail6
+
+        mov edi, [test_log_fd]
+        call sys_close
+        test_pass
+        jmp .test_done
+.fail6: test_fail
+
+.log_data db 'test log entry', 10
+.log_data_len = $ - .log_data
+
+.test_done:
         call arena_destroy
 
         ; remove test files
@@ -190,7 +218,8 @@ fake_envp:
         dq .env1, 0
 .env1 db 'HOME=/tmp', 0
 
-test_fd dd 0
+test_fd     dd 0
+test_log_fd dd 0
 
 arena_base dq 0
 arena_pos  dq 0
